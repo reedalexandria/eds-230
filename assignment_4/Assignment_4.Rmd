@@ -1,0 +1,133 @@
+---
+title: "Assignment 4"
+author: "Colleen McCamy and Alex Reed"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: 
+    highlight: zenburn
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+library(sensitivity)
+library(tidyverse)
+library(lhs)
+library(purrr)
+library(ggpubr)
+```
+
+```{r}
+source("Catm.R")
+```
+
+a) Use the Latin hypercube approach to generate parameter values for the 4 parameters
+```{r}
+# set a random seed to make things 'random'
+set.seed(363)
+
+# which parameters
+pnames = c("height", "k_d", "k_o", "v")
+
+# how many parameters
+npar =  length(pnames)
+# how many samples
+nsample = 100
+
+parm_quant = randomLHS(nsample, npar)
+colnames(parm_quant)=pnames
+
+parm = as.data.frame(matrix(nrow=nrow(parm_quant), ncol=ncol(parm_quant)))
+colnames(parm) = pnames
+
+parm[,"height"] = qunif(parm_quant[,"height"], min=9.5, max=10.5)
+parm[,"k_d"] = qnorm(parm_quant[,"k_d"], mean=0.7, sd=0.01)
+parm[,"k_o"] = qnorm(parm_quant[,"k_o"], mean=0.1, sd=0.01)
+parm[,"v"] = qnorm(parm_quant[,"v"], mean=2.5, sd=0.3)
+```
+
+b) Run the atmospheric conductance model for these parameters
+```{r}
+atm_con <- parm |> 
+  pmap(Catm)
+
+atm_con_df <- do.call(rbind, atm_con) |>
+  cbind(parm) 
+
+col_names <- names(atm_con_df)
+col_names[1] <- "values"
+atm_con_df <- setNames(atm_con_df, col_names)
+```
+
+c) Plot conductance estimates in a way that accounts for parameter uncertainty
+```{r}
+# uncertainty bounds 
+tmp = atm_con_df |> 
+  gather(value="values", key="parameter")
+
+ggplot(tmp, aes(parameter, values, fill =parameter))+
+  geom_boxplot(alpha = 0.8)+labs(y="Coductance estimates")+
+  facet_wrap(~parameter, scales="free") +
+  scale_fill_manual(values = c("#386641", "#3D405B", "grey", "#778da9")) +
+  labs(x = "Paramaters",
+       title = "Distribution of conductance estimates for each parameter") +
+  theme_minimal()
+```
+
+d) Plot conductance estimates against each of your parameters
+```{r}
+height <- ggplot(atm_con_df, aes(x = height,
+                                 y = values)) +
+  geom_point(col = "#386641") +
+  theme_minimal() +
+  labs(x = "Height (m)",
+       title = "Parameter sensitivity on conductance estimates")
+
+k_d <- ggplot(atm_con_df, aes(x = k_d,
+                              y = values)) +
+  geom_point(col = "#3D405B")+
+  theme_minimal() +
+  labs(x = "Zero plane displacement",
+       y = NULL)
+
+k_o <- ggplot(atm_con_df, aes(x = k_o,
+                              y = values)) +
+  geom_point(col = "grey")+
+  theme_minimal() +
+  labs(x = "Roughness")
+
+v <- ggplot(atm_con_df, aes(x = v,
+                            y = values)) +
+  geom_point(col = "#778da9")+
+  theme_minimal() +
+  labs(x = "Windspeed (m/s)",
+       y = NULL)
+
+ggarrange(height, k_d, k_o, v, ncol = 2, nrow = 2) 
+```
+
+e) Estimate the Partial Rank Correlation Coefficients
+```{r}
+senresult_rank = pcc(parm, atm_con_df$values, rank=TRUE)
+senresult_rank
+#plot(senresult_rank)
+
+names <- tibble(parm = c("height", "k_d", "k_o", "v"))
+senresult_rank_df <- senresult_rank$PRCC |> 
+  cbind(names)
+
+ggplot(senresult_rank_df, aes(x = parm, y = original, fill = parm)) +
+  geom_col() +
+  scale_fill_manual(values = c("#386641", "#3D405B", "grey", "#778da9")) +
+  labs(x = "paramaters",
+       y = "PRCC coefficients",
+       title = "PRCC coefficients for each parameters") +
+  theme_minimal()
+```
+
+f) Discuss what your results tell you about how aerodynamic conductance? What does it suggest about what you should focus on if you want to reduce uncertainty in aerodynamic conductance estimates? Does this tell you anything about the sensitivity of plant water use to climate change?
+
+**The results indicate that windspeed and roughness are the two parameters that effect the uncertainty of aerodynamic conductance the most. Therefore, it is more important to have accrurate windspeed and roughness when modeling aerodynamic conductance estimates. Comparing the values of the PRCC, highlights that windspeed and roughness have the highest relative importance on predictions of aerodynamic conductance within this model. There is a positive correlation between windspeed and conductance. Therefore, if the number of days of volatile wind increases due to climate change, plant water use will experience a decrease.** 
+
+
+
+

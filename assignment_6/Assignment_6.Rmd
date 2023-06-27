@@ -1,0 +1,123 @@
+---
+title: "Assignment 6"
+author: "Alex Reed"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(deSolve)
+library(sensitivity)
+```
+
+# 1. Implement model
+```{r}
+source("dCgrowth.R")
+
+dCgrowth
+```
+
+# 2. Run model
+```{r}
+simtimes = seq(from=1, to=300)
+parms = list(Ct = 50, r=0.01, K=250, g = 2)
+Cinitial = 10
+
+result = ode(y=Cinitial, times=simtimes, func=dCgrowth, parms=parms)
+colnames(result)=c("time","C")
+```
+
+# 3. Graph the results.
+```{r}
+# turn it into a data frame
+result = as.data.frame(result)
+ggplot(result, aes(time, C)) +
+  geom_point(col = "darkgreen") +
+  labs(x = "Time (years)",
+       y = "Size of the forest (kg/C)",
+       title = "Forest growth over 300 years") +
+  theme_minimal()
+```
+
+#4
+```{r}
+# want to learn about sensitivity to growth rate (r) and carrying capacity 
+# set the number of parameters
+np=2000
+pct_var = 0.1
+
+K = rnorm(mean=250, sd=250*pct_var, n=np)
+r = rnorm(mean=0.01, sd=0.01*pct_var, n=np)
+g = rnorm(mean=2, sd=2*pct_var, n=np)
+Ct = rnorm(mean=50, sd=50*pct_var, n=np)
+X1 = cbind.data.frame(r=r, K=K, g=g, Ct=Ct)
+
+# repeat to get our second set of samples
+K = rnorm(mean=250, sd=250*pct_var, n=np)
+r = rnorm(mean=0.01, sd=0.01*pct_var, n=np)
+g = rnorm(mean=2, sd=2*pct_var, n=np)
+Ct = rnorm(mean=50, sd=50*pct_var, n=np)
+X2 = cbind.data.frame(r=r, K=K, g=g, Ct=Ct)
+
+# fix any negative values and they are not meaningful
+X1 = X1 %>% map_df(pmax, 0.0)
+X2 = X2 %>% map_df(pmax, 0.0)
+
+sens_P = sobolSalt(model = NULL,X1, X2, nboot = 300)
+
+# lets add names 
+colnames(sens_P$X) = c("r","K","g", "Ct")
+
+#maxC = max(as.data.frame(result$C))
+
+p_wrapper = function(r,K, g, Ct, Cinitial, simtimes, func) {
+    parms = list(r=r, K=K, g=g, Ct=Ct)
+    result = ode(y=Cinitial, times=simtimes, func=func, parms=parms) 
+    colnames(result)=c("time","C")
+  # get metrics
+  metrics=max(as.data.frame(result[,2]))
+  return(metrics)
+}
+
+allresults = as.data.frame(sens_P$X) %>% 
+  pmap(p_wrapper, Cinitial=Cinitial, simtimes=simtimes, func=dCgrowth)
+
+allres <- do.call(rbind, allresults) # "matrix" "array" 
+# convert to dataframe and change column name
+allres <- as.data.frame(allres) %>%
+  rename(maxC = V1)
+```
+
+#5
+```{r}
+# create boxplot
+ggplot(allres, aes(maxC))+
+  geom_boxplot(fill = "darkgreen") +
+  coord_flip() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) +
+  labs(x = "Maximum size of the forest (kg/C)") +
+  theme_minimal()
+```
+
+#6
+```{r}
+sens_P_maxC = sensitivity::tell(sens_P,allres$maxC)
+
+# first-order indices 
+rownames(sens_P_maxC$S) = c("r","K","g", "Ct")
+print(sens_P_maxC$S)
+
+# total sensitivity 
+rownames(sens_P_maxC$T) = c("r","K","g", "Ct")
+print(sens_P_maxC$T)
+```
+
+**Pre-canopy closure growth rate appears to be the most sensitive. However, pre-canopy closure growth rate, post-canopy growth rate, and carrying capacity have similar sensitivities. Canopy closure threshold appears to be the least sensitive with confidence interval including zero. Climate change would have an effect on the parameters. For example, increase in drought could lead to a decrease in growth rate or warming temperatures that increase the growing season could increase the growth rate. In addition, the threshold at which the canopy closes may change due to changes in growing conditions, which would effect the inflection point at which the growth rate changes.** 
+
+
